@@ -1,0 +1,505 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Tindahan Tracker</title>
+<meta name="theme-color" content="#1f4d3f">
+<meta name="description" content="Paninda, benta, ug utang tracker para sa sari-sari store">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Tindahan">
+<style>
+/* Layout: one-screen app, sticky header, scrolling list, bottom tab bar like a phone app */
+:root{
+  --bg:#f6f4ec; --surface:#ffffff; --ink:#1d2a24; --muted:#66736b; --line:#e2ded0;
+  --brand:#1f4d3f; --brand-ink:#ffffff; --sun:#f2b632; --sun-ink:#3a2a00;
+  --ok:#2f7d4f; --warn:#b7791f; --bad:#b83b3b; --soft:#efeadb;
+  --font:"Segoe UI",Roboto,"Helvetica Neue",Arial,system-ui,sans-serif;
+  --num:ui-monospace,"SF Mono","Roboto Mono",Menlo,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root{
+  --bg:#121815; --surface:#1b2420; --ink:#e8eee9; --muted:#9aa89f; --line:#2c3832;
+  --brand:#2e6b58; --brand-ink:#ffffff; --sun:#f2b632; --sun-ink:#2a1e00;
+  --ok:#5cc184; --warn:#e3a849; --bad:#ef7a7a; --soft:#232e29; color-scheme:dark}}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{background:var(--bg);color:var(--ink);font:15px/1.45 var(--font);-webkit-tap-highlight-color:transparent;
+  display:flex;flex-direction:column;padding-top:env(safe-area-inset-top,0px)}
+button,input,select,textarea{font:inherit;color:inherit}
+header{background:var(--brand);color:var(--brand-ink);padding:14px max(16px,env(safe-area-inset-left,0px)) 14px max(16px,env(safe-area-inset-right,0px))}
+header h1{margin:0;font-size:20px;letter-spacing:.2px;display:flex;align-items:center;gap:8px}
+header .sub{opacity:.8;font-size:13px}
+.awning{height:8px;background:repeating-linear-gradient(90deg,var(--sun) 0 22px,var(--brand) 22px 44px)}
+main{flex:1;overflow-y:auto;padding:14px max(16px,env(safe-area-inset-right,0px)) 100px max(16px,env(safe-area-inset-left,0px))}
+.view{display:flex;flex-direction:column;gap:12px;max-width:640px;margin:0 auto}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
+.stat b{display:block;font-family:var(--num);font-size:16px;font-variant-numeric:tabular-nums;overflow-wrap:anywhere}
+.stat span{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.6px}
+.row{display:flex;gap:8px;align-items:center}
+.search{flex:1;min-width:0;padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.btn{border:0;border-radius:10px;padding:11px 14px;background:var(--brand);color:var(--brand-ink);font-weight:600;cursor:pointer;white-space:nowrap}
+.btn.sun{background:var(--sun);color:var(--sun-ink)}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.danger{background:var(--bad);color:#fff}
+.btn:focus-visible,.tab:focus-visible,.item:focus-visible{outline:3px solid var(--sun);outline-offset:2px}
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.item{display:flex;gap:10px;align-items:center;padding:12px;border:0;border-bottom:1px solid var(--line);background:transparent;text-align:left;width:100%;cursor:pointer}
+.item:last-child{border-bottom:0}
+.item .main{flex:1;min-width:0}
+.item .name{font-weight:600;overflow-wrap:anywhere}
+.item .meta{font-size:12.5px;color:var(--muted)}
+.item .amt{font-family:var(--num);font-variant-numeric:tabular-nums;text-align:right;white-space:nowrap}
+.chip{display:inline-block;font-size:11px;font-weight:700;padding:2px 7px;border-radius:99px;margin-left:6px;vertical-align:1px}
+.chip.low{background:color-mix(in srgb,var(--warn) 18%,transparent);color:var(--warn)}
+.chip.out{background:color-mix(in srgb,var(--bad) 18%,transparent);color:var(--bad)}
+.chip.paid{background:color-mix(in srgb,var(--ok) 18%,transparent);color:var(--ok)}
+.empty{padding:28px 16px;text-align:center;color:var(--muted)}
+.banner{background:var(--soft);border:1px dashed var(--warn);border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;font-size:13.5px}
+.banner p{margin:0;flex:1;min-width:0}
+h2{font-size:13px;text-transform:uppercase;letter-spacing:.8px;color:var(--muted);margin:6px 2px 0}
+.cats{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
+.cat{border:1px solid var(--line);background:var(--surface);border-radius:99px;padding:6px 12px;white-space:nowrap;cursor:pointer;font-size:13px}
+.cat.on{background:var(--ink);color:var(--bg);border-color:var(--ink)}
+nav.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);border-top:1px solid var(--line);
+  padding:6px max(8px,env(safe-area-inset-right,0px)) calc(6px + env(safe-area-inset-bottom,0px)) max(8px,env(safe-area-inset-left,0px));z-index:5}
+.tab{border:0;background:transparent;display:flex;flex-direction:column;align-items:center;gap:2px;padding:6px 0;font-size:11.5px;color:var(--muted);cursor:pointer;border-radius:10px}
+.tab svg{width:22px;height:22px}
+.tab.on{color:var(--brand);font-weight:700}
+@media (prefers-color-scheme:dark){.tab.on{color:var(--sun)}}
+.cartbar{position:fixed;left:0;right:0;bottom:calc(64px + env(safe-area-inset-bottom,0px));padding:0 max(12px,env(safe-area-inset-right,0px)) 8px max(12px,env(safe-area-inset-left,0px));z-index:4}
+.cartbar .inner{max-width:640px;margin:0 auto;background:var(--ink);color:var(--bg);border-radius:14px;padding:10px 12px;display:flex;align-items:center;gap:10px;box-shadow:0 6px 20px rgba(0,0,0,.25)}
+.cartbar .inner b{font-family:var(--num);font-size:17px}
+.qty{display:flex;align-items:center;gap:6px}
+.qty button{width:32px;height:32px;border-radius:8px;border:1px solid var(--line);background:var(--surface);font-weight:700;cursor:pointer}
+.qty span{min-width:22px;text-align:center;font-family:var(--num)}
+/* sheet */
+.scrim{position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:20;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);width:100%;max-width:640px;max-height:92%;overflow-y:auto;border-radius:18px 18px 0 0;
+  padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
+.sheet h3{margin:0;font-size:18px}
+.field{display:flex;flex-direction:column;gap:4px}
+.field label{font-size:12.5px;color:var(--muted);font-weight:600}
+.field input,.field select,.field textarea{padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);width:100%;min-width:0}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.actions{display:flex;gap:8px;flex-wrap:wrap}
+.actions .btn{flex:1}
+.err{color:var(--bad);font-size:13px;min-height:1em}
+.toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(140px + env(safe-area-inset-bottom,0px));background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:99px;font-size:14px;z-index:30;max-width:90%}
+.seg{display:grid;grid-template-columns:1fr 1fr;background:var(--soft);border-radius:10px;padding:3px}
+.seg button{border:0;background:transparent;padding:9px;border-radius:8px;font-weight:600;cursor:pointer}
+.seg button.on{background:var(--surface);box-shadow:0 1px 3px rgba(0,0,0,.15)}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.card p{margin:0;color:var(--muted);font-size:13.5px}
+.big{font-family:var(--num);font-size:26px;font-weight:700;font-variant-numeric:tabular-nums}
+.pos{color:var(--bad)} .zero{color:var(--ok)}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(30px);opacity:.6}}}
+</style>
+</head>
+<body>
+<header>
+  <h1><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M3 9l1.5-5h15L21 9M3 9h18M3 9v11h18V9M9 20v-6h6v6"/></svg><span id="storeName">Tindahan</span></h1>
+  <div class="sub" id="hdrSub">Paninda, benta, ug utang</div>
+</header>
+<div class="awning" aria-hidden="true"></div>
+<main id="main"></main>
+<div class="cartbar" id="cartbar" hidden></div>
+<nav class="tabs" aria-label="Main">
+  <button class="tab" data-tab="paninda"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/></svg>Paninda</button>
+  <button class="tab" data-tab="benta"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 4h2l2.4 11h11L21 7H6.2M9 20a1 1 0 100-2 1 1 0 000 2zM18 20a1 1 0 100-2 1 1 0 000 2z"/></svg>Benta</button>
+  <button class="tab" data-tab="utang"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2zM9 8h6M9 12h6"/></svg>Utang</button>
+  <button class="tab" data-tab="settings"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 15a3 3 0 100-6 3 3 0 000 6z"/><path d="M19.4 15a1.6 1.6 0 00.3 1.8l.1.1a2 2 0 11-2.8 2.8l-.1-.1a1.6 1.6 0 00-2.7 1.1V21a2 2 0 11-4 0v-.1A1.6 1.6 0 007.4 19.4a1.6 1.6 0 00-1.8.3l-.1.1a2 2 0 11-2.8-2.8l.1-.1A1.6 1.6 0 003.1 14H3a2 2 0 110-4h.1A1.6 1.6 0 004.6 7.4a1.6 1.6 0 00-.3-1.8l-.1-.1a2 2 0 112.8-2.8l.1.1A1.6 1.6 0 0010 3.1V3a2 2 0 114 0v.1a1.6 1.6 0 002.7 1.1l.1-.1a2 2 0 112.8 2.8l-.1.1a1.6 1.6 0 00-.3 1.8V9a1.6 1.6 0 001.5 1H21a2 2 0 110 4h-.1a1.6 1.6 0 00-1.5 1z"/></svg>Backup</button>
+</nav>
+
+<script>
+"use strict";
+const KEY = "tindahan-v1";
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const peso = n => "₱" + (Math.round(n * 100) / 100).toLocaleString("en-PH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = iso => new Date(iso).toLocaleString("en-PH", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+
+function sample() {
+  const p = (name, category, price, cost, stock, reorder) => ({id: uid(), name, category, price, cost, stock, reorder});
+  return {
+    storeName: "Tindahan",
+    seeded: true,
+    products: [
+      p("Lucky Me Pancit Canton", "Noodles", 18, 15, 24, 10),
+      p("Coke Mismo", "Drinks", 20, 17, 12, 12),
+      p("Kopiko 3-in-1", "Kape", 10, 8, 40, 20),
+      p("Bear Brand Swak", "Gatas", 15, 12.5, 6, 10),
+      p("Sardinas Ligo", "De lata", 28, 24, 0, 5),
+      p("Safeguard Soap", "Sabon", 25, 21, 8, 5),
+      p("Bigas (per kilo)", "Bigas", 52, 46, 25, 10),
+      p("Itlog", "Fresh", 9, 7.5, 30, 12)
+    ],
+    sales: [],
+    customers: [
+      {id: uid(), name: "Manang Lorna", phone: "", entries: [{id: uid(), date: new Date().toISOString(), type: "utang", amount: 145, note: "Bigas ug sardinas"}]}
+    ]
+  };
+}
+function blank() { return {storeName: "Tindahan", seeded: false, products: [], sales: [], customers: []}; }
+
+let db;
+function load() {
+  try { const raw = localStorage.getItem(KEY); if (raw) { db = JSON.parse(raw); return; } } catch (e) {}
+  db = sample(); save();
+}
+function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast("Wala na-save. Puno na ang storage?"); } }
+
+let tab = "paninda", catFilter = "All", q = "", cart = {}, utangOpen = null;
+
+function toast(msg) {
+  const t = document.createElement("div"); t.className = "toast"; t.textContent = msg; t.setAttribute("role", "status");
+  document.body.appendChild(t); setTimeout(() => t.remove(), 2200);
+}
+
+/* ---------- sheet (modal) ---------- */
+function sheet(html, onMount) {
+  closeSheet();
+  const s = document.createElement("div"); s.className = "scrim"; s.id = "scrim";
+  s.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
+  s.addEventListener("click", e => { if (e.target === s) closeSheet(); });
+  document.body.appendChild(s); onMount && onMount(s.querySelector(".sheet"));
+  const f = s.querySelector("input,select,textarea"); if (f && !matchMedia("(pointer:coarse)").matches) f.focus();
+}
+function closeSheet() { document.getElementById("scrim")?.remove(); }
+function confirmSheet(title, body, okLabel, onOk) {
+  sheet(`<h3>${esc(title)}</h3><p style="margin:0;color:var(--muted)">${esc(body)}</p>
+    <div class="actions"><button class="btn ghost" data-x>Cancel</button><button class="btn danger" data-ok>${esc(okLabel)}</button></div>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    el.querySelector("[data-ok]").onclick = () => { closeSheet(); onOk(); };
+  });
+}
+
+/* ---------- PANINDA (products CRUD) ---------- */
+function stockChip(p) {
+  if (p.stock <= 0) return `<span class="chip out">Ubos</span>`;
+  if (p.stock <= p.reorder) return `<span class="chip low">Gamay na</span>`;
+  return "";
+}
+function categories() { return ["All", ...[...new Set(db.products.map(p => p.category).filter(Boolean))].sort()]; }
+function filtered() {
+  const s = q.trim().toLowerCase();
+  return db.products.filter(p => (catFilter === "All" || p.category === catFilter) && (!s || p.name.toLowerCase().includes(s)))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+function viewPaninda() {
+  const low = db.products.filter(p => p.stock <= p.reorder).length;
+  const value = db.products.reduce((a, p) => a + p.cost * Math.max(0, p.stock), 0);
+  const list = filtered();
+  return `<div class="view">
+    ${db.seeded ? `<div class="banner"><p><b>Sample data ni.</b> Para makita nimo unsaon pag-gamit. Tangtanga kung ready na ka.</p><button class="btn ghost" id="clearSample">Clear</button></div>` : ""}
+    <div class="stats">
+      <div class="stat"><span>Items</span><b>${db.products.length}</b></div>
+      <div class="stat"><span>Gamay/Ubos</span><b style="color:${low ? "var(--warn)" : "inherit"}">${low}</b></div>
+      <div class="stat"><span>Puhunan</span><b>${peso(value)}</b></div>
+    </div>
+    <div class="row"><input class="search" id="q" type="search" placeholder="Pangitaa ang paninda…" value="${esc(q)}" aria-label="Search products"><button class="btn sun" id="addP">+ Add</button></div>
+    <div class="cats">${categories().map(c => `<button class="cat ${c === catFilter ? "on" : ""}" data-cat="${esc(c)}">${esc(c)}</button>`).join("")}</div>
+    <div class="list">${list.length ? list.map(p => `
+      <button class="item" data-edit="${p.id}">
+        <div class="main"><div class="name">${esc(p.name)}${stockChip(p)}</div>
+        <div class="meta">${esc(p.category || "No category")} · Stock: ${p.stock} · Kita ${peso(p.price - p.cost)}/pc</div></div>
+        <div class="amt">${peso(p.price)}</div>
+      </button>`).join("") : `<div class="empty">${db.products.length ? "Walay nakit-an." : "Wala pay paninda. Tap <b>+ Add</b> para mag-add sa una nimong item."}</div>`}
+    </div></div>`;
+}
+function productForm(p) {
+  const isNew = !p; p = p || {name: "", category: "", price: "", cost: "", stock: "", reorder: 5};
+  const cats = categories().slice(1);
+  sheet(`<h3>${isNew ? "Bag-ong paninda" : "Edit paninda"}</h3>
+    <form id="pf" class="field" style="gap:12px" novalidate>
+      <div class="field"><label for="f-name">Pangalan</label><input id="f-name" required value="${esc(p.name)}" placeholder="e.g. Lucky Me Pancit Canton"></div>
+      <div class="field"><label for="f-cat">Category</label><input id="f-cat" list="catlist" value="${esc(p.category)}" placeholder="e.g. Noodles"><datalist id="catlist">${cats.map(c => `<option value="${esc(c)}">`).join("")}</datalist></div>
+      <div class="grid2">
+        <div class="field"><label for="f-price">Presyo (₱)</label><input id="f-price" type="number" inputmode="decimal" step="0.01" min="0" value="${p.price}"></div>
+        <div class="field"><label for="f-cost">Puhunan (₱)</label><input id="f-cost" type="number" inputmode="decimal" step="0.01" min="0" value="${p.cost}"></div>
+        <div class="field"><label for="f-stock">Stock</label><input id="f-stock" type="number" inputmode="numeric" step="1" value="${p.stock}"></div>
+        <div class="field"><label for="f-reorder">Alert kung ≤</label><input id="f-reorder" type="number" inputmode="numeric" step="1" min="0" value="${p.reorder}"></div>
+      </div>
+      ${isNew ? "" : `<div class="field"><label for="f-add">Restock (dugangi ang stock)</label><div class="row"><input id="f-add" type="number" inputmode="numeric" step="1" min="0" placeholder="0" style="flex:1"><button type="button" class="btn ghost" id="restock">+ Add</button></div></div>`}
+      <div class="err" id="ferr"></div>
+      <div class="actions">${isNew ? "" : `<button type="button" class="btn danger" id="delP" style="flex:0 0 auto">Delete</button>`}<button type="button" class="btn ghost" data-x>Cancel</button><button class="btn" type="submit">Save</button></div>
+    </form>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    const $ = id => el.querySelector("#" + id);
+    if (!isNew) {
+      $("restock").onclick = () => { const n = parseInt($("f-add").value, 10); if (n > 0) { $("f-stock").value = (parseInt($("f-stock").value, 10) || 0) + n; $("f-add").value = ""; toast(`+${n} sa stock. I-Save para ma-record.`); } };
+      $("delP").onclick = () => confirmSheet("Delete " + p.name + "?", "Matangtang ni sa imong paninda list. Ang mga nauna nga benta magpabilin.", "Delete", () => {
+        db.products = db.products.filter(x => x.id !== p.id); delete cart[p.id]; save(); render(); toast("Deleted");
+      });
+    }
+    $("pf").onsubmit = e => {
+      e.preventDefault();
+      const name = $("f-name").value.trim(), price = parseFloat($("f-price").value), cost = parseFloat($("f-cost").value || "0");
+      const stock = parseInt($("f-stock").value || "0", 10), reorder = parseInt($("f-reorder").value || "0", 10);
+      if (!name) return $("ferr").textContent = "Butangi og pangalan.";
+      if (!(price >= 0) || isNaN(price)) return $("ferr").textContent = "Butangi og presyo.";
+      const rec = {name, category: $("f-cat").value.trim(), price, cost: isNaN(cost) ? 0 : cost, stock: isNaN(stock) ? 0 : stock, reorder: isNaN(reorder) ? 0 : reorder};
+      if (isNew) db.products.push({id: uid(), ...rec}); else Object.assign(db.products.find(x => x.id === p.id), rec);
+      save(); closeSheet(); render(); toast(isNew ? "Na-add na" : "Na-save");
+    };
+  });
+}
+
+/* ---------- BENTA (sales) ---------- */
+function cartTotal() { return Object.entries(cart).reduce((a, [id, n]) => { const p = db.products.find(x => x.id === id); return a + (p ? p.price * n : 0); }, 0); }
+function cartCount() { return Object.values(cart).reduce((a, n) => a + n, 0); }
+function viewBenta() {
+  const t = today();
+  const todays = db.sales.filter(s => s.date.slice(0, 10) === t);
+  const total = todays.reduce((a, s) => a + s.total, 0);
+  const profit = todays.reduce((a, s) => a + s.items.reduce((b, i) => b + (i.price - i.cost) * i.qty, 0), 0);
+  const list = filtered();
+  const recent = [...db.sales].reverse().slice(0, 30);
+  return `<div class="view">
+    <div class="stats">
+      <div class="stat"><span>Benta karon</span><b>${peso(total)}</b></div>
+      <div class="stat"><span>Kita karon</span><b>${peso(profit)}</b></div>
+      <div class="stat"><span>Transactions</span><b>${todays.length}</b></div>
+    </div>
+    <input class="search" id="q" type="search" placeholder="Pangitaa ang paninda…" value="${esc(q)}" aria-label="Search products">
+    <div class="list">${list.length ? list.map(p => { const n = cart[p.id] || 0; return `
+      <div class="item" style="cursor:default">
+        <div class="main"><div class="name">${esc(p.name)}${stockChip(p)}</div><div class="meta">${peso(p.price)} · Stock: ${p.stock}</div></div>
+        <div class="qty"><button data-dec="${p.id}" aria-label="Kuhaan">−</button><span>${n}</span><button data-inc="${p.id}" aria-label="Dugangan">+</button></div>
+      </div>`; }).join("") : `<div class="empty">Wala pay paninda. Add sa una sa Paninda tab.</div>`}</div>
+    <h2>Recent nga benta</h2>
+    <div class="list">${recent.length ? recent.map(s => `
+      <button class="item" data-sale="${s.id}"><div class="main"><div class="name">${esc(s.items.map(i => `${i.qty}× ${i.name}`).join(", "))}</div><div class="meta">${fmtDate(s.date)}</div></div><div class="amt">${peso(s.total)}</div></button>`).join("")
+      : `<div class="empty">Wala pay benta. Tap <b>+</b> sa item para mag-start.</div>`}</div>
+  </div>`;
+}
+function renderCartbar() {
+  const bar = document.getElementById("cartbar");
+  if (tab !== "benta" || !cartCount()) { bar.hidden = true; return; }
+  bar.hidden = false;
+  bar.innerHTML = `<div class="inner"><div style="flex:1;min-width:0"><div style="font-size:12px;opacity:.75">${cartCount()} items</div><b>${peso(cartTotal())}</b></div>
+    <button class="btn ghost" id="clearCart" style="color:inherit;border-color:rgba(127,127,127,.5)">Clear</button><button class="btn sun" id="checkout">Bayad na</button></div>`;
+  bar.querySelector("#clearCart").onclick = () => { cart = {}; render(); };
+  bar.querySelector("#checkout").onclick = checkout;
+}
+function checkout() {
+  const total = cartTotal();
+  sheet(`<h3>Checkout</h3>
+    <div class="card"><p>Total</p><div class="big">${peso(total)}</div></div>
+    <div class="field"><label for="f-cash">Cash nga gihatag (optional)</label><input id="f-cash" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g. 500"></div>
+    <div class="card" id="change" hidden><p>Sukli</p><div class="big" id="changeAmt"></div></div>
+    <div class="field"><label for="f-cust">Utang ni? Pilia ang customer (optional)</label><select id="f-cust"><option value="">Dili, cash</option>${db.customers.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+    <div class="actions"><button class="btn ghost" data-x>Cancel</button><button class="btn" id="done">Record benta</button></div>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    const cash = el.querySelector("#f-cash");
+    cash.oninput = () => { const v = parseFloat(cash.value); const box = el.querySelector("#change"); if (v >= 0) { box.hidden = false; const d = v - total; el.querySelector("#changeAmt").textContent = d >= 0 ? peso(d) : "Kulang " + peso(-d); } else box.hidden = true; };
+    el.querySelector("#done").onclick = () => {
+      const items = Object.entries(cart).map(([id, qty]) => { const p = db.products.find(x => x.id === id); return p && {pid: id, name: p.name, qty, price: p.price, cost: p.cost}; }).filter(Boolean);
+      items.forEach(i => { db.products.find(x => x.id === i.pid).stock -= i.qty; });
+      const custId = el.querySelector("#f-cust").value;
+      const sale = {id: uid(), date: new Date().toISOString(), items, total, customerId: custId || null};
+      db.sales.push(sale);
+      if (custId) { const c = db.customers.find(x => x.id === custId); c.entries.push({id: uid(), date: sale.date, type: "utang", amount: total, note: items.map(i => `${i.qty}× ${i.name}`).join(", "), saleId: sale.id}); }
+      cart = {}; save(); closeSheet(); render(); toast(custId ? "Na-record as utang" : "Na-record ang benta");
+    };
+  });
+}
+function saleDetail(s) {
+  sheet(`<h3>Benta · ${fmtDate(s.date)}</h3>
+    <div class="list">${s.items.map(i => `<div class="item" style="cursor:default"><div class="main"><div class="name">${i.qty}× ${esc(i.name)}</div><div class="meta">${peso(i.price)} each</div></div><div class="amt">${peso(i.price * i.qty)}</div></div>`).join("")}</div>
+    <div class="row" style="justify-content:space-between"><b>Total</b><b class="big" style="font-size:20px">${peso(s.total)}</b></div>
+    ${s.customerId ? `<p style="margin:0;color:var(--muted);font-size:13px">Na-charge as utang ni ${esc(db.customers.find(c => c.id === s.customerId)?.name || "customer")}.</p>` : ""}
+    <div class="actions"><button class="btn danger" id="void">Void / Delete</button><button class="btn ghost" data-x>Close</button></div>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    el.querySelector("#void").onclick = () => confirmSheet("I-void ni nga benta?", "Mabalik ang stock sa mga item. Kung utang ni, matangtang pud sa listahan sa customer.", "Void", () => {
+      s.items.forEach(i => { const p = db.products.find(x => x.id === i.pid); if (p) p.stock += i.qty; });
+      db.sales = db.sales.filter(x => x.id !== s.id);
+      db.customers.forEach(c => c.entries = c.entries.filter(e => e.saleId !== s.id));
+      save(); render(); toast("Na-void");
+    });
+  });
+}
+
+/* ---------- UTANG (customer credit) ---------- */
+const balance = c => c.entries.reduce((a, e) => a + (e.type === "utang" ? e.amount : -e.amount), 0);
+function viewUtang() {
+  if (utangOpen) { const c = db.customers.find(x => x.id === utangOpen); if (c) return viewCustomer(c); utangOpen = null; }
+  const s = q.trim().toLowerCase();
+  const list = db.customers.filter(c => !s || c.name.toLowerCase().includes(s)).sort((a, b) => balance(b) - balance(a));
+  const total = db.customers.reduce((a, c) => a + Math.max(0, balance(c)), 0);
+  const withDebt = db.customers.filter(c => balance(c) > 0).length;
+  return `<div class="view">
+    <div class="stats" style="grid-template-columns:1fr 1fr">
+      <div class="stat"><span>Total utang</span><b style="color:${total ? "var(--bad)" : "inherit"}">${peso(total)}</b></div>
+      <div class="stat"><span>Naay utang</span><b>${withDebt} / ${db.customers.length}</b></div>
+    </div>
+    <div class="row"><input class="search" id="q" type="search" placeholder="Pangitaa ang customer…" value="${esc(q)}" aria-label="Search customers"><button class="btn sun" id="addC">+ Customer</button></div>
+    <div class="list">${list.length ? list.map(c => { const b = balance(c); return `
+      <button class="item" data-cust="${c.id}"><div class="main"><div class="name">${esc(c.name)}${b <= 0 ? `<span class="chip paid">Bayad na</span>` : ""}</div><div class="meta">${c.entries.length} entries${c.phone ? " · " + esc(c.phone) : ""}</div></div>
+      <div class="amt ${b > 0 ? "pos" : "zero"}">${peso(b)}</div></button>`; }).join("") : `<div class="empty">${db.customers.length ? "Walay nakit-an." : "Wala pay customer sa lista. Tap <b>+ Customer</b>."}</div>`}</div>
+  </div>`;
+}
+function viewCustomer(c) {
+  const b = balance(c);
+  return `<div class="view">
+    <button class="btn ghost" id="back" style="align-self:flex-start">← Balik sa lista</button>
+    <div class="card"><p>${esc(c.name)}${c.phone ? " · " + esc(c.phone) : ""}</p><div class="big ${b > 0 ? "pos" : "zero"}">${peso(b)}</div>
+      <div class="actions"><button class="btn danger" id="addDebt">+ Utang</button><button class="btn" id="addPay">+ Bayad</button></div>
+      <div class="actions"><button class="btn ghost" id="editC">Edit customer</button></div></div>
+    <h2>History</h2>
+    <div class="list">${c.entries.length ? [...c.entries].reverse().map(e => `
+      <button class="item" data-entry="${e.id}"><div class="main"><div class="name">${e.type === "utang" ? "Utang" : "Bayad"}${e.note ? " · " + esc(e.note) : ""}</div><div class="meta">${fmtDate(e.date)}</div></div>
+      <div class="amt" style="color:${e.type === "utang" ? "var(--bad)" : "var(--ok)"}">${e.type === "utang" ? "+" : "−"}${peso(e.amount)}</div></button>`).join("") : `<div class="empty">Wala pay entry.</div>`}</div>
+  </div>`;
+}
+function customerForm(c) {
+  const isNew = !c; c = c || {name: "", phone: ""};
+  sheet(`<h3>${isNew ? "Bag-ong customer" : "Edit customer"}</h3>
+    <form id="cf" class="field" style="gap:12px" novalidate>
+      <div class="field"><label for="c-name">Pangalan</label><input id="c-name" value="${esc(c.name)}" placeholder="e.g. Manang Lorna"></div>
+      <div class="field"><label for="c-phone">Phone (optional)</label><input id="c-phone" type="tel" inputmode="tel" value="${esc(c.phone)}" placeholder="09xx xxx xxxx"></div>
+      <div class="err" id="cerr"></div>
+      <div class="actions">${isNew ? "" : `<button type="button" class="btn danger" id="delC" style="flex:0 0 auto">Delete</button>`}<button type="button" class="btn ghost" data-x>Cancel</button><button class="btn" type="submit">Save</button></div>
+    </form>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    if (!isNew) el.querySelector("#delC").onclick = () => confirmSheet("Delete " + c.name + "?", "Matangtang ang customer ug tanan niyang utang history. Dili na ni mabalik.", "Delete", () => {
+      db.customers = db.customers.filter(x => x.id !== c.id); utangOpen = null; save(); render(); toast("Deleted");
+    });
+    el.querySelector("#cf").onsubmit = e => {
+      e.preventDefault();
+      const name = el.querySelector("#c-name").value.trim(); if (!name) return el.querySelector("#cerr").textContent = "Butangi og pangalan.";
+      const phone = el.querySelector("#c-phone").value.trim();
+      if (isNew) db.customers.push({id: uid(), name, phone, entries: []}); else Object.assign(db.customers.find(x => x.id === c.id), {name, phone});
+      save(); closeSheet(); render(); toast("Na-save");
+    };
+  });
+}
+function entryForm(c, type, entry) {
+  const isNew = !entry; entry = entry || {amount: "", note: ""};
+  if (!isNew) type = entry.type;
+  sheet(`<h3>${isNew ? (type === "utang" ? "Dugang utang" : "Bayad") : "Edit entry"} · ${esc(c.name)}</h3>
+    <form id="ef" class="field" style="gap:12px" novalidate>
+      ${isNew ? "" : `<div class="seg"><button type="button" data-t="utang" class="${type === "utang" ? "on" : ""}">Utang</button><button type="button" data-t="bayad" class="${type === "bayad" ? "on" : ""}">Bayad</button></div>`}
+      <div class="field"><label for="e-amt">Amount (₱)</label><input id="e-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${entry.amount}"></div>
+      <div class="field"><label for="e-note">Note (optional)</label><input id="e-note" value="${esc(entry.note)}" placeholder="${type === "utang" ? "e.g. 2 kilo bigas" : "e.g. Partial payment"}"></div>
+      ${isNew && type === "bayad" && balance(c) > 0 ? `<button type="button" class="btn ghost" id="full">Bayad tanan (${peso(balance(c))})</button>` : ""}
+      <div class="err" id="eerr"></div>
+      <div class="actions">${isNew ? "" : `<button type="button" class="btn danger" id="delE" style="flex:0 0 auto">Delete</button>`}<button type="button" class="btn ghost" data-x>Cancel</button><button class="btn" type="submit">Save</button></div>
+    </form>`, el => {
+    el.querySelector("[data-x]").onclick = closeSheet;
+    el.querySelectorAll("[data-t]").forEach(b => b.onclick = () => { type = b.dataset.t; el.querySelectorAll("[data-t]").forEach(x => x.classList.toggle("on", x === b)); });
+    el.querySelector("#full")?.addEventListener("click", () => { el.querySelector("#e-amt").value = balance(c).toFixed(2); });
+    if (!isNew) el.querySelector("#delE").onclick = () => confirmSheet("Delete ni nga entry?", `${entry.type === "utang" ? "Utang" : "Bayad"} nga ${peso(entry.amount)} matangtang.`, "Delete", () => {
+      c.entries = c.entries.filter(x => x.id !== entry.id); save(); render(); toast("Deleted");
+    });
+    el.querySelector("#ef").onsubmit = e => {
+      e.preventDefault();
+      const amount = parseFloat(el.querySelector("#e-amt").value);
+      if (!(amount > 0)) return el.querySelector("#eerr").textContent = "Butangi og amount nga labaw sa 0.";
+      const note = el.querySelector("#e-note").value.trim();
+      if (isNew) c.entries.push({id: uid(), date: new Date().toISOString(), type, amount, note});
+      else Object.assign(c.entries.find(x => x.id === entry.id), {type, amount, note});
+      save(); closeSheet(); render(); toast("Na-save");
+    };
+  });
+}
+
+/* ---------- BACKUP / SETTINGS ---------- */
+function viewSettings() {
+  return `<div class="view">
+    <div class="card"><b>Pangalan sa tindahan</b>
+      <div class="row"><input class="search" id="sname" value="${esc(db.storeName)}" aria-label="Store name"><button class="btn" id="saveName">Save</button></div></div>
+    <div class="card"><b>Backup</b>
+      <p>Ang data naa ra sa kini nga phone. Mag-download og backup kada semana para dili mawala kung ma-clear ang browser o mausab og phone.</p>
+      <div class="actions"><button class="btn" id="exp">Download backup</button><button class="btn ghost" id="impBtn">Restore backup</button></div>
+      <input type="file" id="imp" accept="application/json,.json" hidden>
+      <button class="btn ghost" id="csv">Download benta as CSV</button></div>
+    <div class="card"><b>I-install sa phone</b>
+      <p><b>Android (Chrome):</b> tap ⋮ menu → <i>Add to Home screen</i> o <i>Install app</i>.</p>
+      <p><b>iPhone (Safari):</b> tap Share → <i>Add to Home Screen</i>.</p>
+      <button class="btn sun" id="installBtn" ${deferredInstall ? "" : "hidden"}>Install app</button></div>
+    <div class="card"><b>Danger zone</b><p>Tangtangon tanan: paninda, benta, ug utang.</p><button class="btn danger" id="wipe">Delete tanan data</button></div>
+    <p style="text-align:center;color:var(--muted);font-size:12px">${db.products.length} paninda · ${db.sales.length} benta · ${db.customers.length} customers</p>
+  </div>`;
+}
+function download(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], {type}));
+  const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/* ---------- render + events ---------- */
+function render() {
+  document.getElementById("storeName").textContent = db.storeName || "Tindahan";
+  document.querySelectorAll(".tab").forEach(t => { t.classList.toggle("on", t.dataset.tab === tab); t.setAttribute("aria-current", t.dataset.tab === tab ? "page" : "false"); });
+  const m = document.getElementById("main");
+  const focused = document.activeElement?.id === "q", caret = focused ? document.activeElement.selectionStart : null;
+  m.innerHTML = tab === "paninda" ? viewPaninda() : tab === "benta" ? viewBenta() : tab === "utang" ? viewUtang() : viewSettings();
+  if (focused) { const i = document.getElementById("q"); if (i) { i.focus(); try { i.setSelectionRange(caret, caret); } catch (e) {} } }
+  renderCartbar();
+}
+document.querySelector(".tabs").addEventListener("click", e => {
+  const b = e.target.closest(".tab"); if (!b) return;
+  if (b.dataset.tab !== tab) { tab = b.dataset.tab; q = ""; catFilter = "All"; utangOpen = null; document.getElementById("main").scrollTop = 0; }
+  else if (tab === "utang") utangOpen = null;
+  render();
+});
+const main = document.getElementById("main");
+main.addEventListener("input", e => { if (e.target.id === "q") { q = e.target.value; render(); } });
+main.addEventListener("click", e => {
+  const t = e.target.closest("button"); if (!t) return;
+  const d = t.dataset;
+  if (t.id === "addP") return productForm();
+  if (d.edit) return productForm(db.products.find(p => p.id === d.edit));
+  if (d.cat) { catFilter = d.cat; return render(); }
+  if (t.id === "clearSample") return confirmSheet("Tangtangon ang sample data?", "Mawala ang sample nga paninda ug customer. Magsugod ka sa blangko.", "Clear sample", () => { const n = db.storeName; db = blank(); db.storeName = n; save(); render(); toast("Ready na. Add na sa imong paninda!"); });
+  if (d.inc) { const p = db.products.find(x => x.id === d.inc); const n = (cart[d.inc] || 0) + 1; if (p.stock - n < 0) toast(`Pasidaan: ${p.stock} ra ang stock sa ${p.name}`); cart[d.inc] = n; return render(); }
+  if (d.dec) { if (cart[d.dec]) { cart[d.dec]--; if (!cart[d.dec]) delete cart[d.dec]; } return render(); }
+  if (d.sale) return saleDetail(db.sales.find(s => s.id === d.sale));
+  if (t.id === "addC") return customerForm();
+  if (d.cust) { utangOpen = d.cust; main.scrollTop = 0; return render(); }
+  if (t.id === "back") { utangOpen = null; return render(); }
+  const c = db.customers.find(x => x.id === utangOpen);
+  if (t.id === "addDebt") return entryForm(c, "utang");
+  if (t.id === "addPay") return entryForm(c, "bayad");
+  if (t.id === "editC") return customerForm(c);
+  if (d.entry) return entryForm(c, null, c.entries.find(x => x.id === d.entry));
+  if (t.id === "saveName") { db.storeName = document.getElementById("sname").value.trim() || "Tindahan"; save(); render(); return toast("Na-save"); }
+  if (t.id === "exp") return download(`tindahan-backup-${today()}.json`, JSON.stringify(db, null, 2), "application/json");
+  if (t.id === "impBtn") return document.getElementById("imp").click();
+  if (t.id === "csv") {
+    const rows = [["Date", "Item", "Qty", "Price", "Cost", "Subtotal", "Customer (utang)"]];
+    db.sales.forEach(s => s.items.forEach(i => rows.push([s.date, i.name, i.qty, i.price, i.cost, i.qty * i.price, db.customers.find(c => c.id === s.customerId)?.name || ""])));
+    return download(`tindahan-benta-${today()}.csv`, rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n"), "text/csv");
+  }
+  if (t.id === "installBtn" && deferredInstall) { deferredInstall.prompt(); deferredInstall = null; return; }
+  if (t.id === "wipe") return confirmSheet("Delete TANAN data?", "Dili na ni mabalik. Mag-download sa una og backup kung kinahanglan.", "Delete tanan", () => { db = blank(); cart = {}; save(); render(); toast("Na-delete tanan"); });
+});
+main.addEventListener("change", e => {
+  if (e.target.id !== "imp" || !e.target.files[0]) return;
+  const r = new FileReader();
+  r.onload = () => {
+    try {
+      const d = JSON.parse(r.result);
+      if (!Array.isArray(d.products) || !Array.isArray(d.sales) || !Array.isArray(d.customers)) throw 0;
+      confirmSheet("I-restore ang backup?", `Ilisan ang current data ug ${d.products.length} paninda, ${d.sales.length} benta, ${d.customers.length} customers.`, "Restore", () => { db = d; cart = {}; save(); render(); toast("Na-restore"); });
+    } catch (err) { toast("Dili valid nga backup file."); }
+  };
+  r.readAsText(e.target.files[0]);
+});
+document.addEventListener("keydown", e => { if (e.key === "Escape") closeSheet(); });
+
+let deferredInstall = null;
+window.addEventListener("beforeinstallprompt", e => { e.preventDefault(); deferredInstall = e; if (tab === "settings") render(); });
+if ("serviceWorker" in navigator && location.protocol !== "file:") navigator.serviceWorker.register("sw.js").catch(() => {});
+
+load(); render();
+</script>
+</body>
+</html>
