@@ -355,8 +355,10 @@ function openPeriod(c) {
 function utangSummary(c) {
   const open = openPeriod(c), rows = {}, order = [];
   open.filter(e => e.type === "utang").forEach(e => {
-    (e.items && e.items.length ? e.items : [{name: e.note || "Utang (walay detalye)", qty: 1, price: e.amount}]).forEach(i => {
-      const k = i.name + "|" + i.price;
+    const src = e.split > 1 ? [{key: e.id, name: `Bahin (1/${e.split}) sa ${peso(e.groupTotal)}: ${e.items.map(i => `${i.qty}× ${i.name}`).join(", ")}`, qty: 1, price: e.amount}]
+      : e.items && e.items.length ? e.items : [{name: e.note || "Utang (walay detalye)", qty: 1, price: e.amount}];
+    src.forEach(i => {
+      const k = i.key || i.name + "|" + i.price;
       if (!rows[k]) { rows[k] = {name: i.name, price: i.price, qty: 0}; order.push(k); }
       rows[k].qty += i.qty;
     });
@@ -365,7 +367,7 @@ function utangSummary(c) {
   const paid = open.filter(e => e.type === "bayad").reduce((a, e) => a + e.amount, 0);
   return {lines: order.map(k => rows[k]), totalUtang, paid, balance: balance(c), since: open[0]?.date};
 }
-const entryLabel = e => e.items && e.items.length ? e.items.map(i => `${i.qty}× ${i.name}`).join(", ") : (e.note || "");
+const entryLabel = e => e.items && e.items.length ? (e.split > 1 ? `Bahin 1/${e.split} sa ${peso(e.groupTotal)}: ` : "") + e.items.map(i => `${i.qty}× ${i.name}`).join(", ") : (e.note || "");
 function viewCustomer(c) {
   const s = utangSummary(c);
   return `<div class="view">
@@ -402,8 +404,15 @@ function removeEntry(c, e) {
     const s = db.sales.find(x => x.id === e.saleId);
     if (s) { s.items.forEach(i => { const p = db.products.find(x => x.id === i.pid); if (p) p.stock += i.qty; }); db.sales = db.sales.filter(x => x.id !== s.id); }
   }
-  c.entries = c.entries.filter(x => x.id !== e.id);
+  if (e.groupId) db.customers.forEach(x => { x.entries = x.entries.filter(y => y.groupId !== e.groupId); });
+  else c.entries = c.entries.filter(x => x.id !== e.id);
 }
+/* split an amount in centavos so the shares always add up exactly */
+function splitEven(amount, n) {
+  const cents = Math.round(amount * 100), base = Math.floor(cents / n), rem = cents - base * n;
+  return Array.from({length: n}, (_, i) => (base + (i < rem ? 1 : 0)) / 100);
+}
+const groupMembers = gid => db.customers.filter(x => x.entries.some(y => y.groupId === gid)).map(x => x.name);
 function utangForm(c) {
   const picks = {}; let sq = "";
   sheet(`<h3>Dugang utang · ${esc(c.name)}</h3>
@@ -411,15 +420,37 @@ function utangForm(c) {
     <div class="list" id="ulist" style="max-height:36vh;overflow-y:auto"></div>
     <div class="field"><label for="e-extra">Lain pa nga amount (₱, optional)</label><input id="e-extra" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g. load o cash nga gihulam"></div>
     <div class="field"><label for="e-note">Note (optional)</label><input id="e-note" placeholder="e.g. Bayran sa sweldo"></div>
-    <div class="card"><p>Total ani nga utang</p><div class="big" id="utot">₱0.00</div><p id="usum"></p></div>
+    <div class="field"><label>Bahinon sa uban? Tap ang mga kauban (optional)</label>
+      <div class="cats" id="splitWith" style="flex-wrap:wrap"></div>
+      <div class="row"><input class="search" id="newMember" placeholder="Bag-ong customer nga kauban…" aria-label="New customer name"><button type="button" class="btn ghost" id="addMember">+ Add</button></div></div>
+    <div class="card"><p>Total ani nga utang</p><div class="big" id="utot">₱0.00</div><p id="usum"></p><p id="ushare" style="color:var(--ink);font-weight:600"></p></div>
     <div class="err" id="eerr"></div>
     <div class="actions"><button class="btn ghost" data-x>Cancel</button><button class="btn danger" id="usave">Save utang</button></div>`, el => {
     const $ = s => el.querySelector(s);
     const picked = () => Object.entries(picks).map(([pid, qty]) => { const p = db.products.find(x => x.id === pid); return p && {pid, name: p.name, qty, price: p.price, cost: p.cost}; }).filter(Boolean);
+    const members = [c.id];
     const total = () => {
       const items = picked(), extra = parseFloat($("#e-extra").value) || 0;
-      $("#utot").textContent = peso(items.reduce((a, i) => a + i.price * i.qty, 0) + extra);
+      const t = items.reduce((a, i) => a + i.price * i.qty, 0) + extra;
+      $("#utot").textContent = peso(t);
       $("#usum").textContent = items.map(i => `${i.qty}× ${i.name}`).join(", ") || "Wala pay napili nga paninda.";
+      $("#ushare").textContent = members.length > 1 && t > 0
+        ? `Bahin sa ${members.length} ka tao: ` + splitEven(t, members.length).map((v, i) => `${db.customers.find(x => x.id === members[i]).name} ${peso(v)}`).join(" · ")
+        : "";
+    };
+    const drawMembers = () => {
+      $("#splitWith").innerHTML = db.customers.map(x => `<button type="button" class="cat ${members.includes(x.id) ? "on" : ""}" data-m="${x.id}" ${x.id === c.id ? "disabled" : ""}>${esc(x.name)}</button>`).join("");
+      total();
+    };
+    $("#splitWith").onclick = e => {
+      const b = e.target.closest("[data-m]"); if (!b || b.dataset.m === c.id) return;
+      const i = members.indexOf(b.dataset.m); if (i >= 0) members.splice(i, 1); else members.push(b.dataset.m);
+      drawMembers();
+    };
+    $("#addMember").onclick = () => {
+      const name = $("#newMember").value.trim(); if (!name) return;
+      const nc = {id: uid(), name, phone: "", entries: []}; db.customers.push(nc); members.push(nc.id);
+      $("#newMember").value = ""; save(); drawMembers();
     };
     const draw = () => {
       const s = sq.trim().toLowerCase();
@@ -450,20 +481,26 @@ function utangForm(c) {
       }
       const lines = items.map(i => ({name: i.name, qty: i.qty, price: i.price}));
       if (extra > 0) lines.push({name: "Lain pa", qty: 1, price: extra});
-      c.entries.push({id: uid(), date, type: "utang", amount, note: $("#e-note").value.trim(), items: lines, saleId});
-      save(); closeSheet(); render(); toast("Na-lista ang utang");
+      const note = $("#e-note").value.trim();
+      if (members.length > 1) {
+        const groupId = uid(), shares = splitEven(amount, members.length);
+        members.forEach((mid, i) => db.customers.find(x => x.id === mid).entries.push({id: uid(), date, type: "utang", amount: shares[i], note, items: lines, saleId, groupId, split: members.length, groupTotal: amount}));
+      } else c.entries.push({id: uid(), date, type: "utang", amount, note, items: lines, saleId});
+      save(); closeSheet(); render(); toast(members.length > 1 ? `Na-bahin sa ${members.length} ka tao` : "Na-lista ang utang");
     };
-    draw();
+    draw(); drawMembers();
   });
 }
 function entryDetail(c, e) {
   sheet(`<h3>Utang · ${fmtDate(e.date)}</h3>
     <div class="list">${e.items.map(i => `<div class="item" style="cursor:default"><div class="main"><div class="name">${i.qty}× ${esc(i.name)}</div><div class="meta">${peso(i.price)} matag usa</div></div><div class="amt">${peso(i.price * i.qty)}</div></div>`).join("")}</div>
-    <div class="row" style="justify-content:space-between"><b>Total</b><b class="big" style="font-size:20px">${peso(e.amount)}</b></div>
+    ${e.split > 1 ? `<div class="row" style="justify-content:space-between"><span>Total sa grupo</span><b>${peso(e.groupTotal)}</b></div>
+    <p style="margin:0;color:var(--muted);font-size:13px">Gibahin sa ${e.split}: ${esc(groupMembers(e.groupId).join(", "))}</p>` : ""}
+    <div class="row" style="justify-content:space-between"><b>${e.split > 1 ? "Bahin ni " + esc(c.name) : "Total"}</b><b class="big" style="font-size:20px">${peso(e.amount)}</b></div>
     ${e.note ? `<p style="margin:0;color:var(--muted);font-size:13px">Note: ${esc(e.note)}</p>` : ""}
     <div class="actions"><button class="btn danger" id="delE">Delete</button><button class="btn ghost" data-x>Close</button></div>`, el => {
     el.querySelector("[data-x]").onclick = closeSheet;
-    el.querySelector("#delE").onclick = () => confirmSheet("Delete ni nga utang?", `${peso(e.amount)} matangtang sa listahan.${e.saleId ? " Ma-void pud ang benta ug mabalik ang stock." : ""}`, "Delete", () => {
+    el.querySelector("#delE").onclick = () => confirmSheet("Delete ni nga utang?", e.split > 1 ? `Bahin-bahin ni nga utang, mao nga matangtang ni sa tanan nga ${e.split} ka tao (${peso(e.groupTotal)}).${e.saleId ? " Ma-void pud ang benta ug mabalik ang stock." : ""}` : `${peso(e.amount)} matangtang sa listahan.${e.saleId ? " Ma-void pud ang benta ug mabalik ang stock." : ""}`, "Delete", () => {
       removeEntry(c, e); save(); render(); toast("Deleted");
     });
   });
