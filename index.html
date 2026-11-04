@@ -83,6 +83,7 @@ nav.tabs{position:fixed;left:0;right:0;bottom:0;display:grid;grid-template-colum
 .sheet{background:var(--surface);width:100%;max-width:640px;max-height:92%;overflow-y:auto;border-radius:18px 18px 0 0;
   padding:16px max(16px,env(safe-area-inset-right,0px)) calc(16px + env(safe-area-inset-bottom,0px)) max(16px,env(safe-area-inset-left,0px));display:flex;flex-direction:column;gap:12px}
 .sheet h3{margin:0;font-size:18px}
+.sheet>*{flex-shrink:0} /* keep lists from collapsing when the sheet is taller than the screen */
 .field{display:flex;flex-direction:column;gap:4px}
 .field label{font-size:12.5px;color:var(--muted);font-weight:600}
 .field input,.field select,.field textarea{padding:11px 12px;border:1px solid var(--line);border-radius:10px;background:var(--bg);width:100%;min-width:0}
@@ -122,7 +123,11 @@ const KEY = "tindahan-v1";
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const peso = n => "₱" + (Math.round(n * 100) / 100).toLocaleString("en-PH", {minimumFractionDigits: 2, maximumFractionDigits: 2});
 const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-const today = () => new Date().toISOString().slice(0, 10);
+const pad2 = n => String(n).padStart(2, "0");
+/* dates follow the phone's own clock (Philippine time on a PH phone), not UTC */
+const localDay = d => { d = new Date(d); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
+const localStamp = d => { d = new Date(d); return `${localDay(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const today = () => localDay(new Date());
 const fmtDate = iso => new Date(iso).toLocaleString("en-PH", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
 
 function sample() {
@@ -170,6 +175,10 @@ function sheet(html, onMount) {
   s.innerHTML = `<div class="sheet" role="dialog" aria-modal="true">${html}</div>`;
   s.addEventListener("click", e => { if (e.target === s) closeSheet(); });
   document.body.appendChild(s); onMount && onMount(s.querySelector(".sheet"));
+  /* run Save through a click too, so it still works where form submission is blocked (e.g. sandboxed previews) */
+  s.querySelectorAll("form").forEach(f => f.querySelector('button[type="submit"]')?.addEventListener("click", e => {
+    e.preventDefault(); f.dispatchEvent(new Event("submit", {cancelable: true}));
+  }));
   const f = s.querySelector("input,select,textarea"); if (f && !matchMedia("(pointer:coarse)").matches) f.focus();
 }
 function closeSheet() { document.getElementById("scrim")?.remove(); }
@@ -257,7 +266,7 @@ function cartTotal() { return Object.entries(cart).reduce((a, [id, n]) => { cons
 function cartCount() { return Object.values(cart).reduce((a, n) => a + n, 0); }
 function viewBenta() {
   const t = today();
-  const todays = db.sales.filter(s => s.date.slice(0, 10) === t);
+  const todays = db.sales.filter(s => localDay(s.date) === t);
   const total = todays.reduce((a, s) => a + s.total, 0);
   const profit = todays.reduce((a, s) => a + s.items.reduce((b, i) => b + (i.price - i.cost) * i.qty, 0), 0);
   const list = filtered();
@@ -566,7 +575,10 @@ function viewSettings() {
       <p>Ang data naa ra sa kini nga phone. Mag-download og backup kada semana para dili mawala kung ma-clear ang browser o mausab og phone.</p>
       <div class="actions"><button class="btn" id="exp">Download backup</button><button class="btn ghost" id="impBtn">Restore backup</button></div>
       <input type="file" id="imp" accept="application/json,.json" hidden>
-      <button class="btn ghost" id="csv">Download benta as CSV</button></div>
+      </div>
+    <div class="card"><b>Download as CSV (para sa Excel o Google Sheets)</b>
+      <p>Benta: matag item nga nabaligya, apil ang kita. Paninda: stock ug puhunan karon. Utang: matag utang ug bayad, apil ang nabilin.</p>
+      <div class="actions"><button class="btn ghost" id="csv">Benta</button><button class="btn ghost" id="csvP">Paninda</button><button class="btn ghost" id="csvU">Utang</button></div></div>
     <div class="card"><b>I-install sa phone</b>
       <p><b>Android (Chrome):</b> tap ⋮ menu → <i>Add to Home screen</i> o <i>Install app</i>.</p>
       <p><b>iPhone (Safari):</b> tap Share → <i>Add to Home Screen</i>.</p>
@@ -575,6 +587,9 @@ function viewSettings() {
     <p style="text-align:center;color:var(--muted);font-size:12px">${db.products.length} paninda · ${db.sales.length} benta · ${db.customers.length} customers</p>
   </div>`;
 }
+const round2 = n => Math.round(n * 100) / 100;
+/* BOM so Excel opens the file as UTF-8 (keeps ₱ and ñ intact) */
+const toCSV = rows => "\ufeff" + rows.map(r => r.map(v => `"${String(v ?? "").replace(/"/g, '""')}"`).join(",")).join("\r\n");
 function download(name, text, type) {
   const url = URL.createObjectURL(new Blob([text], {type}));
   const a = document.createElement("a"); a.href = url; a.download = name; document.body.appendChild(a); a.click(); a.remove();
@@ -622,10 +637,30 @@ main.addEventListener("click", e => {
   if (t.id === "exp") return download(`tindahan-backup-${today()}.json`, JSON.stringify(db, null, 2), "application/json");
   if (t.id === "impBtn") return document.getElementById("imp").click();
   if (t.id === "csv") {
-    const rows = [["Date", "Item", "Qty", "Price", "Cost", "Subtotal", "Customer (utang)"]];
-    db.sales.forEach(s => s.items.forEach(i => rows.push([s.date, i.name, i.qty, i.price, i.cost, i.qty * i.price, db.customers.find(c => c.id === s.customerId)?.name || ""])));
-    return download(`tindahan-benta-${today()}.csv`, rows.map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(",")).join("\n"), "text/csv");
+    const rows = [["Date", "Item", "Qty", "Price", "Cost", "Subtotal", "Profit", "Bayad", "Customer (utang)"]];
+    [...db.sales].sort((a, b) => a.date.localeCompare(b.date)).forEach(s => {
+      const who = db.customers.filter(c => c.entries.some(e => e.saleId === s.id)).map(c => c.name);
+      if (!who.length && s.customerId) { const c = db.customers.find(x => x.id === s.customerId); if (c) who.push(c.name); }
+      s.items.forEach(i => rows.push([localStamp(s.date), i.name, i.qty, i.price, i.cost, i.qty * i.price, round2(i.qty * (i.price - i.cost)), who.length ? "Utang" : "Cash", who.join(" / ")]));
+    });
+    return download(`tindahan-benta-${today()}.csv`, toCSV(rows), "text/csv");
   }
+  if (t.id === "csvP") {
+    const rows = [["Item", "Category", "Price", "Cost", "Kita per piraso", "Stock", "Alert kung <=", "Status", "Puhunan sa stock"]];
+    [...db.products].sort((a, b) => a.name.localeCompare(b.name)).forEach(p => rows.push([p.name, p.category, p.price, p.cost, round2(p.price - p.cost), p.stock, p.reorder,
+      p.stock <= 0 ? "Ubos" : p.stock <= p.reorder ? "Gamay na" : "OK", round2(p.cost * Math.max(0, p.stock))]));
+    return download(`tindahan-paninda-${today()}.csv`, toCSV(rows), "text/csv");
+  }
+  if (t.id === "csvU") {
+    const rows = [["Customer", "Phone", "Date", "Type", "Amount", "Detalye", "Note", "Nabilin human ani"]];
+    [...db.customers].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {
+      let run = 0;
+      c.entries.forEach(e => { run += e.type === "utang" ? e.amount : -e.amount;
+        rows.push([c.name, c.phone, localStamp(e.date), e.type === "utang" ? "Utang" : "Bayad", e.amount, entryLabel(e), e.items && e.items.length ? e.note : "", round2(run)]); });
+    });
+    return download(`tindahan-utang-${today()}.csv`, toCSV(rows), "text/csv");
+  }
+
   if (t.id === "installBtn" && deferredInstall) { deferredInstall.prompt(); deferredInstall = null; return; }
   if (t.id === "wipe") return confirmSheet("Delete TANAN data?", "Dili na ni mabalik. Mag-download sa una og backup kung kinahanglan.", "Delete tanan", () => { db = blank(); cart = {}; save(); render(); toast("Na-delete tanan"); });
 });

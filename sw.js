@@ -1,5 +1,5 @@
 // Offline cache. Bump VERSION when you change index.html so phones get the update.
-const VERSION = "tindahan-v3";
+const VERSION = "tindahan-v6";
 const FILES = ["./", "index.html", "manifest.json", "icon-192.png", "icon-512.png", "apple-touch-icon.png"];
 self.addEventListener("install", e => { e.waitUntil(caches.open(VERSION).then(c => c.addAll(FILES))); self.skipWaiting(); });
 self.addEventListener("activate", e => {
