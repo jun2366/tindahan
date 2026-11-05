@@ -128,7 +128,10 @@ const pad2 = n => String(n).padStart(2, "0");
 const localDay = d => { d = new Date(d); return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`; };
 const localStamp = d => { d = new Date(d); return `${localDay(d)} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
 const today = () => localDay(new Date());
-const fmtDate = iso => new Date(iso).toLocaleString("en-PH", {month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+const fmtDate = iso => new Date(iso).toLocaleString("en-PH", {year: "numeric", month: "short", day: "numeric", hour: "numeric", minute: "2-digit"});
+const fmtTime = iso => new Date(iso).toLocaleTimeString("en-PH", {hour: "numeric", minute: "2-digit"});
+const ADLAW = ["Domingo", "Lunes", "Martes", "Miyerkules", "Huwebes", "Biyernes", "Sabado"];
+const fmtDay = iso => { const d = new Date(iso); return `${ADLAW[d.getDay()]}, ${d.toLocaleDateString("en-PH", {year: "numeric", month: "short", day: "numeric"})}`; };
 
 function sample() {
   const p = (name, category, price, cost, stock, reorder) => ({id: uid(), name, category, price, cost, stock, reorder});
@@ -155,12 +158,31 @@ function blank() { return {storeName: "Tindahan", seeded: false, products: [], s
 
 let db;
 function load() {
-  try { const raw = localStorage.getItem(KEY); if (raw) { db = JSON.parse(raw); return; } } catch (e) {}
-  db = sample(); save();
+  try { const raw = localStorage.getItem(KEY); if (raw) { db = JSON.parse(raw); migrate(); return; } } catch (e) {}
+  db = sample(); migrate(); save();
 }
+/* give every utang/bayad a transaction number (one number per bahin-bahin group) and keep entries in date order */
+function migrate() {
+  db.txnSeq = db.txnSeq || 0;
+  const all = db.customers.flatMap(c => c.entries).filter(e => !e.txn).sort((a, b) => a.date.localeCompare(b.date));
+  const byGroup = {};
+  all.forEach(e => {
+    if (e.groupId && byGroup[e.groupId]) { e.txn = byGroup[e.groupId]; return; }
+    e.txn = nextTxn(); if (e.groupId) byGroup[e.groupId] = e.txn;
+  });
+  db.customers.forEach(sortEntries);
+  if (all.length) save();
+}
+const nextTxn = () => "T-" + String(++db.txnSeq).padStart(4, "0");
+const sortEntries = c => c.entries.sort((a, b) => a.date.localeCompare(b.date));
+const nowInput = () => { const d = new Date(); return `${localDay(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+const toInput = iso => { const d = new Date(iso); return `${localDay(d)}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`; };
+/* datetime-local values are read as phone-local time */
+const fromInput = v => { const d = v ? new Date(v) : new Date(); return isNaN(d) ? new Date().toISOString() : d.toISOString(); };
+const whenField = (val, label = "Petsa ug oras") => `<div class="field"><label for="e-when">${label}</label><input id="e-when" type="datetime-local" value="${val}"></div>`;
 function save() { try { localStorage.setItem(KEY, JSON.stringify(db)); } catch (e) { toast("Wala na-save. Puno na ang storage?"); } }
 
-let tab = "paninda", catFilter = "All", q = "", cart = {}, utangOpen = null;
+let tab = "paninda", catFilter = "All", q = "", cart = {}, utangOpen = null, utangMode = "customers", txnFilter = "all";
 
 function toast(msg) {
   document.querySelectorAll(".toast").forEach(x => x.remove());
@@ -315,7 +337,7 @@ function checkout() {
       const custId = el.querySelector("#f-cust").value;
       const sale = {id: uid(), date: new Date().toISOString(), items, total, customerId: custId || null};
       db.sales.push(sale);
-      if (custId) { const c = db.customers.find(x => x.id === custId); c.entries.push({id: uid(), date: sale.date, type: "utang", amount: total, note: "", items: items.map(i => ({name: i.name, qty: i.qty, price: i.price})), saleId: sale.id}); }
+      if (custId) { const c = db.customers.find(x => x.id === custId); c.entries.push({id: uid(), txn: nextTxn(), date: sale.date, type: "utang", amount: total, note: "", items: items.map(i => ({name: i.name, qty: i.qty, price: i.price})), saleId: sale.id}); sortEntries(c); }
       cart = {}; save(); closeSheet(); render(); toast(custId ? "Na-record as utang" : "Na-record ang benta");
     };
   });
@@ -340,6 +362,7 @@ function saleDetail(s) {
 const balance = c => c.entries.reduce((a, e) => a + (e.type === "utang" ? e.amount : -e.amount), 0);
 function viewUtang() {
   if (utangOpen) { const c = db.customers.find(x => x.id === utangOpen); if (c) return viewCustomer(c); utangOpen = null; }
+  if (utangMode === "txns") return viewTxns();
   const s = q.trim().toLowerCase();
   const list = db.customers.filter(c => !s || c.name.toLowerCase().includes(s)).sort((a, b) => balance(b) - balance(a));
   const total = db.customers.reduce((a, c) => a + Math.max(0, balance(c)), 0);
@@ -349,6 +372,7 @@ function viewUtang() {
       <div class="stat"><span>Total utang</span><b style="color:${total ? "var(--bad)" : "inherit"}">${peso(total)}</b></div>
       <div class="stat"><span>Naay utang</span><b>${withDebt} / ${db.customers.length}</b></div>
     </div>
+    ${modeToggle()}
     <div class="row"><input class="search" id="q" type="search" placeholder="Pangitaa ang customer…" value="${esc(q)}" aria-label="Search customers"><button class="btn sun" id="addC">+ Customer</button></div>
     <div class="list">${list.length ? list.map(c => { const b = balance(c); return `
       <button class="item" data-cust="${c.id}"><div class="main"><div class="name">${esc(c.name)}${b <= 0 ? `<span class="chip paid">Bayad na</span>` : ""}</div><div class="meta">${c.entries.length} entries${c.phone ? " · " + esc(c.phone) : ""}</div></div>
@@ -377,6 +401,31 @@ function utangSummary(c) {
   return {lines: order.map(k => rows[k]), totalUtang, paid, balance: balance(c), since: open[0]?.date};
 }
 const entryLabel = e => e.items && e.items.length ? (e.split > 1 ? `Bahin 1/${e.split} sa ${peso(e.groupTotal)}: ` : "") + e.items.map(i => `${i.qty}× ${i.name}`).join(", ") : (e.note || "");
+const modeToggle = () => `<div class="seg"><button data-mode="customers" class="${utangMode === "customers" ? "on" : ""}">Customers</button><button data-mode="txns" class="${utangMode === "txns" ? "on" : ""}">Transactions</button></div>`;
+function viewTxns() {
+  const s = q.trim().toLowerCase();
+  const rows = db.customers.flatMap(c => c.entries.map(e => ({c, e})))
+    .filter(({c, e}) => (txnFilter === "all" || e.type === txnFilter) && (!s || [c.name, e.txn, entryLabel(e), e.note].join(" ").toLowerCase().includes(s)))
+    .sort((a, b) => b.e.date.localeCompare(a.e.date));
+  const days = []; rows.forEach(r => { const k = localDay(r.e.date); if (!days.length || days[days.length - 1].k !== k) days.push({k, date: r.e.date, rows: []}); days[days.length - 1].rows.push(r); });
+  const sum = (list, t) => list.filter(r => r.e.type === t).reduce((a, r) => a + r.e.amount, 0);
+  return `<div class="view">
+    <div class="stats" style="grid-template-columns:1fr 1fr">
+      <div class="stat"><span>Utang karon</span><b style="color:var(--bad)">${peso(sum(rows.filter(r => localDay(r.e.date) === today()), "utang"))}</b></div>
+      <div class="stat"><span>Bayad karon</span><b style="color:var(--ok)">${peso(sum(rows.filter(r => localDay(r.e.date) === today()), "bayad"))}</b></div>
+    </div>
+    ${modeToggle()}
+    <input class="search" id="q" type="search" placeholder="Pangitaa: pangalan, T-0001, item…" value="${esc(q)}" aria-label="Search transactions">
+    <div class="cats">${[["all", "Tanan"], ["utang", "Utang"], ["bayad", "Bayad"]].map(([k, l]) => `<button class="cat ${txnFilter === k ? "on" : ""}" data-tf="${k}">${l}</button>`).join("")}</div>
+    ${days.length ? days.map(d => `
+      <h2 style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><span>${fmtDay(d.date)}</span><span style="text-transform:none;letter-spacing:0">${sum(d.rows, "utang") ? `<span style="color:var(--bad)">+${peso(sum(d.rows, "utang"))}</span>` : ""} ${sum(d.rows, "bayad") ? `<span style="color:var(--ok)">−${peso(sum(d.rows, "bayad"))}</span>` : ""}</span></h2>
+      <div class="list">${d.rows.map(({c, e}) => `
+        <button class="item" data-txn="${c.id}|${e.id}"><div class="main"><div class="name">${esc(c.name)} · ${e.type === "utang" ? "Utang" : "Bayad"}</div>
+        <div class="meta">${e.txn} · ${fmtTime(e.date)}${entryLabel(e) ? " · " + esc(entryLabel(e)) : ""}</div></div>
+        <div class="amt" style="color:${e.type === "utang" ? "var(--bad)" : "var(--ok)"}">${e.type === "utang" ? "+" : "−"}${peso(e.amount)}</div></button>`).join("")}</div>`).join("")
+      : `<div class="list"><div class="empty">${db.customers.some(c => c.entries.length) ? "Walay nakit-an." : "Wala pay transaction. Mag-add ug utang o bayad sa Customers."}</div></div>`}
+  </div>`;
+}
 function viewCustomer(c) {
   const s = utangSummary(c);
   return `<div class="view">
@@ -396,7 +445,7 @@ function viewCustomer(c) {
     ${s.lines.length ? `<div class="actions"><button class="btn ghost" id="copyList">Copy listahan (para i-send)</button></div>` : ""}
     <h2>History</h2>
     <div class="list">${c.entries.length ? [...c.entries].reverse().map(e => `
-      <button class="item" data-entry="${e.id}"><div class="main"><div class="name">${e.type === "utang" ? "Utang" : "Bayad"}</div><div class="meta">${esc(entryLabel(e)) || "&nbsp;"}${e.items && e.note ? " · " + esc(e.note) : ""}<br>${fmtDate(e.date)}</div></div>
+      <button class="item" data-entry="${e.id}"><div class="main"><div class="name">${e.type === "utang" ? "Utang" : "Bayad"}</div><div class="meta">${esc(entryLabel(e)) || "&nbsp;"}${e.items && e.note ? " · " + esc(e.note) : ""}<br>${e.txn || ""} · ${fmtDate(e.date)}</div></div>
       <div class="amt" style="color:${e.type === "utang" ? "var(--bad)" : "var(--ok)"}">${e.type === "utang" ? "+" : "−"}${peso(e.amount)}</div></button>`).join("") : `<div class="empty">Wala pay entry.</div>`}</div>
     <div class="actions"><button class="btn ghost" id="editC">Edit customer</button></div>
   </div>`;
@@ -429,6 +478,7 @@ function utangForm(c) {
     <div class="list" id="ulist" style="max-height:36vh;overflow-y:auto"></div>
     <div class="field"><label for="e-extra">Lain pa nga amount (₱, optional)</label><input id="e-extra" type="number" inputmode="decimal" step="0.01" min="0" placeholder="e.g. load o cash nga gihulam"></div>
     <div class="field"><label for="e-note">Note (optional)</label><input id="e-note" placeholder="e.g. Bayran sa sweldo"></div>
+    ${whenField(nowInput(), "Petsa ug oras (usba kung nauna nga utang)")}
     <div class="field"><label>Bahinon sa uban? Tap ang mga kauban (optional)</label>
       <div class="cats" id="splitWith" style="flex-wrap:wrap"></div>
       <div class="row"><input class="search" id="newMember" placeholder="Bag-ong customer nga kauban…" aria-label="New customer name"><button type="button" class="btn ghost" id="addMember">+ Add</button></div></div>
@@ -482,7 +532,7 @@ function utangForm(c) {
       const items = picked(), extra = parseFloat($("#e-extra").value) || 0;
       const itemsTotal = items.reduce((a, i) => a + i.price * i.qty, 0), amount = itemsTotal + extra;
       if (!(amount > 0)) return $("#eerr").textContent = "Pili ug paninda o butangi ug amount.";
-      const date = new Date().toISOString(); let saleId = null;
+      const date = fromInput($("#e-when").value); let saleId = null;
       if (items.length) {
         items.forEach(i => { db.products.find(x => x.id === i.pid).stock -= i.qty; });
         const sale = {id: uid(), date, items, total: itemsTotal, customerId: c.id};
@@ -490,18 +540,18 @@ function utangForm(c) {
       }
       const lines = items.map(i => ({name: i.name, qty: i.qty, price: i.price}));
       if (extra > 0) lines.push({name: "Lain pa", qty: 1, price: extra});
-      const note = $("#e-note").value.trim();
+      const note = $("#e-note").value.trim(), txn = nextTxn();
       if (members.length > 1) {
         const groupId = uid(), shares = splitEven(amount, members.length);
-        members.forEach((mid, i) => db.customers.find(x => x.id === mid).entries.push({id: uid(), date, type: "utang", amount: shares[i], note, items: lines, saleId, groupId, split: members.length, groupTotal: amount}));
-      } else c.entries.push({id: uid(), date, type: "utang", amount, note, items: lines, saleId});
-      save(); closeSheet(); render(); toast(members.length > 1 ? `Na-bahin sa ${members.length} ka tao` : "Na-lista ang utang");
+        members.forEach((mid, i) => { const m = db.customers.find(x => x.id === mid); m.entries.push({id: uid(), txn, date, type: "utang", amount: shares[i], note, items: lines, saleId, groupId, split: members.length, groupTotal: amount}); sortEntries(m); });
+      } else { c.entries.push({id: uid(), txn, date, type: "utang", amount, note, items: lines, saleId}); sortEntries(c); }
+      save(); closeSheet(); render(); toast(`${txn} · ` + (members.length > 1 ? `Na-bahin sa ${members.length} ka tao` : "Na-lista ang utang"));
     };
     draw(); drawMembers();
   });
 }
 function entryDetail(c, e) {
-  sheet(`<h3>Utang · ${fmtDate(e.date)}</h3>
+  sheet(`<h3>Utang ${e.txn || ""}</h3><p style="margin:0;color:var(--muted)">${esc(c.name)} · ${fmtDay(e.date)}, ${fmtTime(e.date)}</p>
     <div class="list">${e.items.map(i => `<div class="item" style="cursor:default"><div class="main"><div class="name">${i.qty}× ${esc(i.name)}</div><div class="meta">${peso(i.price)} matag usa</div></div><div class="amt">${peso(i.price * i.qty)}</div></div>`).join("")}</div>
     ${e.split > 1 ? `<div class="row" style="justify-content:space-between"><span>Total sa grupo</span><b>${peso(e.groupTotal)}</b></div>
     <p style="margin:0;color:var(--muted);font-size:13px">Gibahin sa ${e.split}: ${esc(groupMembers(e.groupId).join(", "))}</p>` : ""}
@@ -539,11 +589,12 @@ function customerForm(c) {
 function entryForm(c, type, entry) {
   const isNew = !entry; entry = entry || {amount: "", note: ""};
   if (!isNew) type = entry.type;
-  sheet(`<h3>${isNew ? (type === "utang" ? "Dugang utang" : "Bayad") : "Edit entry"} · ${esc(c.name)}</h3>
+  sheet(`<h3>${isNew ? (type === "utang" ? "Dugang utang" : "Bayad") : "Edit " + (entry.txn || "entry")} · ${esc(c.name)}</h3>
     <form id="ef" class="field" style="gap:12px" novalidate>
       ${isNew ? "" : `<div class="seg"><button type="button" data-t="utang" class="${type === "utang" ? "on" : ""}">Utang</button><button type="button" data-t="bayad" class="${type === "bayad" ? "on" : ""}">Bayad</button></div>`}
       <div class="field"><label for="e-amt">Amount (₱)</label><input id="e-amt" type="number" inputmode="decimal" step="0.01" min="0" value="${entry.amount}"></div>
       <div class="field"><label for="e-note">Note (optional)</label><input id="e-note" value="${esc(entry.note)}" placeholder="${type === "utang" ? "e.g. 2 kilo bigas" : "e.g. Partial payment"}"></div>
+      ${whenField(isNew ? nowInput() : toInput(entry.date))}
       ${isNew && type === "bayad" && balance(c) > 0 ? `<button type="button" class="btn ghost" id="full">Bayad tanan (${peso(balance(c))})</button>` : ""}
       <div class="err" id="eerr"></div>
       <div class="actions">${isNew ? "" : `<button type="button" class="btn danger" id="delE" style="flex:0 0 auto">Delete</button>`}<button type="button" class="btn ghost" data-x>Cancel</button><button class="btn" type="submit">Save</button></div>
@@ -559,9 +610,11 @@ function entryForm(c, type, entry) {
       const amount = parseFloat(el.querySelector("#e-amt").value);
       if (!(amount > 0)) return el.querySelector("#eerr").textContent = "Butangi og amount nga labaw sa 0.";
       const note = el.querySelector("#e-note").value.trim();
-      if (isNew) c.entries.push({id: uid(), date: new Date().toISOString(), type, amount, note});
-      else Object.assign(c.entries.find(x => x.id === entry.id), {type, amount, note});
-      save(); closeSheet(); render(); toast("Na-save");
+      const date = fromInput(el.querySelector("#e-when").value);
+      let txn = entry.txn;
+      if (isNew) { txn = nextTxn(); c.entries.push({id: uid(), txn, date, type, amount, note}); }
+      else Object.assign(c.entries.find(x => x.id === entry.id), {type, amount, note, date});
+      sortEntries(c); save(); closeSheet(); render(); toast(`${txn} · Na-save`);
     };
   });
 }
@@ -625,6 +678,10 @@ main.addEventListener("click", e => {
   if (d.dec) { if (cart[d.dec]) { cart[d.dec]--; if (!cart[d.dec]) delete cart[d.dec]; } return render(); }
   if (d.sale) return saleDetail(db.sales.find(s => s.id === d.sale));
   if (t.id === "addC") return customerForm();
+  if (d.mode) { utangMode = d.mode; q = ""; return render(); }
+  if (d.tf) { txnFilter = d.tf; return render(); }
+  if (d.txn) { const [cid, eid] = d.txn.split("|"); const tc = db.customers.find(x => x.id === cid), te = tc?.entries.find(x => x.id === eid); if (!te) return;
+    return te.items && te.items.length ? entryDetail(tc, te) : entryForm(tc, null, te); }
   if (d.cust) { utangOpen = d.cust; main.scrollTop = 0; return render(); }
   if (t.id === "back") { utangOpen = null; return render(); }
   const c = db.customers.find(x => x.id === utangOpen);
@@ -652,11 +709,11 @@ main.addEventListener("click", e => {
     return download(`tindahan-paninda-${today()}.csv`, toCSV(rows), "text/csv");
   }
   if (t.id === "csvU") {
-    const rows = [["Customer", "Phone", "Date", "Type", "Amount", "Detalye", "Note", "Nabilin human ani"]];
+    const rows = [["Transaction", "Customer", "Phone", "Date", "Type", "Amount", "Detalye", "Note", "Nabilin human ani"]];
     [...db.customers].sort((a, b) => a.name.localeCompare(b.name)).forEach(c => {
       let run = 0;
       c.entries.forEach(e => { run += e.type === "utang" ? e.amount : -e.amount;
-        rows.push([c.name, c.phone, localStamp(e.date), e.type === "utang" ? "Utang" : "Bayad", e.amount, entryLabel(e), e.items && e.items.length ? e.note : "", round2(run)]); });
+        rows.push([e.txn || "", c.name, c.phone, localStamp(e.date), e.type === "utang" ? "Utang" : "Bayad", e.amount, entryLabel(e), e.items && e.items.length ? e.note : "", round2(run)]); });
     });
     return download(`tindahan-utang-${today()}.csv`, toCSV(rows), "text/csv");
   }
